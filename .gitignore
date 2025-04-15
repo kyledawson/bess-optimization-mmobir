@@ -19,11 +19,11 @@ ENV/
 .idea/
 *.swp
 *.swo
+.cursor/*
 
 # Operating System files
 .DS_Store
 Thumbs.db 
 
-# IDE / Editor specific files
-.cursor/*
+
 
