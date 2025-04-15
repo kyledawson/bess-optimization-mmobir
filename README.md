@@ -23,6 +23,57 @@ It includes:
     - Display optimization results (expected/total revenue, charts, schedule table).
     - Visualize generated RTM price scenarios (in stochastic mode).
 
+## Optimization Models
+
+The `bess_optimizer.py` script implements two core optimization strategies:
+
+### 1. Deterministic Optimization (`optimize_day_ahead_arbitrage`)
+
+This model assumes perfect foresight of the Day-Ahead Market (DAM) prices provided as input.
+
+-   **Objective:** Maximize the total profit from energy arbitrage over the 24-hour period. Profit in each hour is calculated as `(Revenue from Discharging) - (Cost of Charging)`, where revenue/cost is determined by the hourly DAM LMP.
+    ```
+    Maximize Σ [ (DischargePower[h] * DAM_LMP[h]) - (ChargePower[h] * DAM_LMP[h]) ]
+    ```
+-   **Key Decision Variables:**
+    -   `ChargePower[h]`: Power (MW) used to charge the battery in hour `h`.
+    -   `DischargePower[h]`: Power (MW) delivered by discharging the battery in hour `h`.
+    -   `SoC[h]`: State of Charge (MWh) of the battery at the *end* of hour `h`.
+-   **Key Constraints:**
+    -   **Power Limits:** Charge/Discharge power cannot exceed the BESS maximum ratings (`max_charge_power_mw`, `max_discharge_power_mw`).
+    -   **SoC Limits:** The battery's state of charge must remain within its minimum and maximum MWh limits (`min_soc_mwh`, `max_soc_mwh`).
+    -   **Energy Balance:** The SoC at the end of an hour depends on the previous hour's SoC, the energy added during charging (adjusted for charge efficiency), and the energy removed during discharging (adjusted for discharge efficiency).
+        ```
+        SoC[h+1] = SoC[h] + (ChargePower[h] * ChargeEfficiency) - (DischargePower[h] / DischargeEfficiency)
+        ```
+    -   **No Simultaneous Charge/Discharge:** Ensures the battery is either charging, discharging, or idle in any given hour.
+
+### 2. Two-Stage Stochastic Optimization (`optimize_two_stage_stochastic`)
+
+This model addresses the uncertainty of Real-Time Market (RTM) prices by optimizing the Day-Ahead schedule while considering multiple possible RTM price scenarios.
+
+-   **Concept:** Uses a two-stage approach:
+    -   **Stage 1 (Here-and-Now):** Decides the optimal DAM charge/discharge schedule for the next day *before* knowing the actual RTM prices. This decision is fixed across all scenarios.
+    -   **Stage 2 (Wait-and-See):** Models the optimal *adjustments* the BESS would make in the RTM (additional charging/discharging) for *each specific RTM price scenario* that could unfold. These adjustments aim to maximize profit within that scenario, given the fixed DAM schedule.
+-   **Objective:** Maximize the *expected* total profit across all scenarios. This includes the profit from the fixed DAM schedule plus the probability-weighted average of the profits from the RTM adjustments made in each scenario.
+    ```
+    Maximize [ DAM_Profit + Σ (ScenarioProbability[s] * RTM_Profit[s]) ]
+    ```
+-   **Scenarios:** The model requires a set of potential RTM price scenarios (`rtm_scenarios`), each with an associated probability. *(Currently, a placeholder function `generate_rtm_price_scenarios` creates these by adding random noise to the DAM prices).* 
+-   **Key Decision Variables:**
+    -   **Stage 1:** `DAM_ChargePower[h]`, `DAM_DischargePower[h]` (one value per hour).
+    -   **Stage 2:** `RTM_ChargePower[h, s]`, `RTM_DischargePower[h, s]`, `SoC[h, s]` (values exist for each hour `h` and each scenario `s`).
+-   **Key Constraints:**
+    -   **Stage 1 Power Limits:** DAM charge/discharge is limited.
+    -   **Stage 2 Constraints (per scenario):**
+        -   **Total Power Limits:** The *sum* of DAM power and RTM adjustment power (charge or discharge) in any hour `h` under scenario `s` cannot exceed the BESS ratings.
+        -   **SoC Limits:** SoC must remain within bounds in every hour for every scenario.
+        -   **Energy Balance:** The SoC transition within each scenario `s` considers both the committed DAM actions and the specific RTM adjustments for that scenario.
+            ```
+            SoC[h+1, s] = SoC[h, s] + (TotalCharge[h, s] * ChargeEff) - (TotalDischarge[h, s] / DischargeEff)
+            ```
+-   **Output:** The primary result is the optimal Stage 1 DAM schedule, which is designed to be robust across the range of potential RTM outcomes represented by the scenarios.
+
 ## Setup
 
 1.  **Clone the repository:**
