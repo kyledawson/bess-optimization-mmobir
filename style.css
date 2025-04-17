@@ -1,0 +1,164 @@
+/* style.css */
+
+/* Base body styling */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    background-color: #f0f2f5; /* Light grey background */
+    color: #1c1c1e; /* Near black text */
+}
+
+/* Main container */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    padding-left: 3rem;
+    padding-right: 3rem;
+}
+
+/* Headings */
+h1, h2, h3 {
+    font-weight: 600;
+    color: #000000; /* Black headings */
+}
+
+h1 {
+    font-size: 2.2rem;
+    margin-bottom: 0.5rem;
+}
+
+h2 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid #d1d1d6; /* Light separator line */
+    padding-bottom: 0.5rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+}
+
+h3 {
+    font-size: 1.2rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.8rem;
+}
+
+/* Buttons */
+.stButton>button {
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    border: 1px solid #007aff; /* Apple blue */
+    background-color: #007aff;
+    color: white;
+    font-weight: 500;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.stButton>button:hover {
+    background-color: #005ecb;
+    border-color: #005ecb;
+}
+
+.stButton>button:active {
+    background-color: #004ca8;
+    border-color: #004ca8;
+}
+
+/* Input widgets */
+.stTextInput>div>div>input, .stDateInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div {
+    border-radius: 8px;
+    border: 1px solid #c7c7cc; /* Lighter grey border */
+    padding: 0.4rem 0.6rem;
+    background-color: #ffffff; /* White background for inputs */
+}
+
+/* Dataframes (subtle styling) */
+.stDataFrame {
+    border: 1px solid #e5e5ea;
+    border-radius: 8px;
+    overflow: hidden; /* Ensures border radius is applied to table */
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    font-weight: 500;
+    color: #007aff; /* Blue expander header */
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 12px; /* Spacing between tab headers */
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 40px;
+    white-space: pre-wrap;
+    background-color: #e9e9eb; /* Lighter background for inactive tabs */
+    border-radius: 8px 8px 0 0; /* Rounded top corners */
+    padding: 0.5rem 1rem;
+    margin-bottom: 0; /* Remove default bottom margin */
+    transition: background-color 0.2s ease;
+    font-weight: 500;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+     background-color: #d1d1d6;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: #ffffff; /* White background for active tab */
+    color: #007aff; /* Blue text for active tab */
+    border-bottom: 2px solid #007aff; /* Blue underline for active tab */
+}
+
+/* Success/Info messages */
+.stAlert {
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+}
+
+/* Plotly chart container (if needed) */
+.stPlotlyChart {
+    border-radius: 8px;
+    overflow: hidden; /* Helps contain chart visuals */
+    background-color: white;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Custom class for explanation box */
+.explanation-box {
+    background-color: #eef5fc; /* Light blue background */
+    border-left: 5px solid #007aff; /* Blue left border */
+    padding: 1rem;
+    margin-top: 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 5px;
+    font-size: 0.95rem;
+    color: #333;
+}
+
+.explanation-box h4 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    color: #005ecb; /* Darker blue for heading */
+    font-weight: 600;
+}
+
+/* Metrics styling */
+.metric-container {
+    background-color: white;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.metric-container .metric-label {
+    font-size: 0.9rem;
+    color: #6e6e73; /* Grey label */
+    margin-bottom: 0.2rem;
+}
+
+.metric-container .metric-value {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: #1c1c1e;
+} 
