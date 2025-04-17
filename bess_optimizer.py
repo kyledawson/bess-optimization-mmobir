@@ -24,14 +24,42 @@ def load_bess_config():
             "min_soc_percent": float(os.getenv("BESS_MIN_SOC_PERCENT", 10)),
             "max_soc_percent": float(os.getenv("BESS_MAX_SOC_PERCENT", 90)),
             "round_trip_efficiency_percent": float(os.getenv("BESS_ROUND_TRIP_EFFICIENCY_PERCENT", 85)),
-            "initial_soc_percent": float(os.getenv("BESS_INITIAL_SOC_PERCENT", 50))
+            "initial_soc_percent": float(os.getenv("BESS_INITIAL_SOC_PERCENT", 50)),
+            
+            # Battery degradation parameters
+            "battery_cost_usd_per_kwh": float(os.getenv("BESS_COST_USD_PER_KWH", 300)),  # Cost of battery in $/kWh
+            "cycle_life_at_100pct_dod": float(os.getenv("BESS_CYCLE_LIFE_100PCT_DOD", 3000)),  # Number of full cycles before EOL at 100% DoD
+            "cycle_life_at_10pct_dod": float(os.getenv("BESS_CYCLE_LIFE_10PCT_DOD", 15000)),  # Number of full cycles before EOL at 10% DoD
+            "min_cycle_count": float(os.getenv("BESS_MIN_CYCLE_COUNT", 0.02)),  # Minimum cycle fraction to count per hour (to prevent excessive small cycles)
         }
+        
         # Convert percentages to decimals
         config["min_soc_mwh"] = config["capacity_mwh"] * config["min_soc_percent"] / 100.0
         config["max_soc_mwh"] = config["capacity_mwh"] * config["max_soc_percent"] / 100.0
         config["initial_soc_mwh"] = config["capacity_mwh"] * config["initial_soc_percent"] / 100.0
         config["charge_efficiency"] = sqrt(config["round_trip_efficiency_percent"] / 100.0)
         config["discharge_efficiency"] = sqrt(config["round_trip_efficiency_percent"] / 100.0)
+        
+        # Derive battery degradation cost parameters
+        # Convert battery cost from $/kWh to $/MWh
+        config["battery_cost_usd_per_mwh"] = config["battery_cost_usd_per_kwh"] * 1000
+        
+        # Total battery capital cost
+        config["total_battery_cost"] = config["capacity_mwh"] * config["battery_cost_usd_per_mwh"]
+        
+        # Calculate rainflow cycle counting parameters
+        # We use a simple linear model between 10% DoD and 100% DoD for cycle life
+        # Marginal degradation cost calculation ($/MWh cycled)
+        config["marginal_degradation_cost_100pct"] = config["total_battery_cost"] / config["cycle_life_at_100pct_dod"]
+        config["marginal_degradation_cost_10pct"] = config["total_battery_cost"] / config["cycle_life_at_10pct_dod"] / 0.1
+        
+        # Slope and intercept for linear degradation cost model
+        # cost = m * DoD + b
+        m = (config["marginal_degradation_cost_100pct"] - config["marginal_degradation_cost_10pct"]) / 0.9
+        b = config["marginal_degradation_cost_10pct"] - m * 0.1
+        config["degradation_cost_slope"] = m
+        config["degradation_cost_intercept"] = b
+        
         return config
     except (ValueError, TypeError) as e:
         raise ValueError(f"Error parsing BESS configuration from .env file: {e}. Ensure all BESS parameters are valid numbers.")
@@ -51,22 +79,76 @@ def optimize_day_ahead_arbitrage(bess_config: dict, prices_df: pd.DataFrame) -> 
     discharge_power = pulp.LpVariable.dicts("DischargePower", hours, lowBound=0, upBound=bess_config["max_discharge_power_mw"], cat='Continuous')
     soc_mwh = pulp.LpVariable.dicts("SoC", range(len(hours) + 1), lowBound=bess_config["min_soc_mwh"], upBound=bess_config["max_soc_mwh"], cat='Continuous')
     is_charging = pulp.LpVariable.dicts("IsCharging", hours, cat='Binary')
+    
+    # --- Degradation Modeling Variables ---
+    # Energy throughput variables (energy cycled through the battery)
+    energy_throughput = pulp.LpVariable.dicts("EnergyThroughput", hours, lowBound=0, cat='Continuous')
+    
+    # Variables to track SoC changes for DoD calculation
+    soc_decrease = pulp.LpVariable.dicts("SoC_Decrease", hours, lowBound=0, cat='Continuous')
+    max_dod = pulp.LpVariable("Max_DoD", lowBound=0, upBound=1, cat='Continuous')
+    
+    # Cycle counting variable (fraction of a cycle in each hour)
+    cycle_count = pulp.LpVariable.dicts("CycleCount", hours, lowBound=0, cat='Continuous')
+    
+    # Degradation cost variable
+    degradation_cost = pulp.LpVariable.dicts("DegradationCost", hours, lowBound=0, cat='Continuous')
 
     # --- Objective Function ---
-    prob += pulp.lpSum(
+    # Original revenue part
+    revenue = pulp.lpSum(
         (discharge_power[h] * prices_df.loc[h, 'LMP'] - charge_power[h] * prices_df.loc[h, 'LMP']) 
         for h in hours
-    ), "Total_Revenue"
+    )
+    
+    # Degradation cost part
+    total_degradation_cost = pulp.lpSum(degradation_cost[h] for h in hours)
+    
+    # Net revenue (revenue minus degradation cost)
+    prob += revenue - total_degradation_cost, "Net_Revenue"
 
     # --- Constraints ---
+    # Initial SoC
     prob += soc_mwh[0] == bess_config["initial_soc_mwh"], "Initial_SoC"
+    
     discharge_efficiency_inverse = 1.0 / bess_config["discharge_efficiency"]
+    
+    # SoC balance and power constraints
     for h in hours:
+        # SoC balance equation
         prob += soc_mwh[h+1] == soc_mwh[h] + (charge_power[h] * bess_config["charge_efficiency"]) - (discharge_power[h] * discharge_efficiency_inverse), f"SoC_Balance_Hour_{h}"
-    M = max(bess_config["max_charge_power_mw"], bess_config["max_discharge_power_mw"]) * 1.1
-    for h in hours:
+        
+        # Prevent simultaneous charge/discharge
+        M = max(bess_config["max_charge_power_mw"], bess_config["max_discharge_power_mw"]) * 1.1
         prob += charge_power[h] <= M * is_charging[h], f"Charge_Indicator_{h}"
         prob += discharge_power[h] <= M * (1 - is_charging[h]), f"Discharge_Indicator_{h}"
+        
+        # Degradation modeling constraints
+        # Energy throughput calculation (use the smaller efficiency to be conservative)
+        min_efficiency = min(bess_config["charge_efficiency"], bess_config["discharge_efficiency"])
+        prob += energy_throughput[h] == charge_power[h] * min_efficiency, f"Energy_Throughput_{h}"
+        
+        # Calculate SoC decrease for DoD tracking
+        if h > 0:
+            prob += soc_decrease[h] >= soc_mwh[h] - soc_mwh[h+1], f"SoC_Decrease_{h}"
+            
+            # Track maximum DoD (as a fraction of usable capacity)
+            usable_capacity = bess_config["max_soc_mwh"] - bess_config["min_soc_mwh"]
+            prob += max_dod >= soc_decrease[h] / usable_capacity, f"Max_DoD_Constraint_{h}"
+        
+        # Calculate cycle fraction
+        # We use energy throughput method: 1 cycle = using the full capacity once
+        prob += cycle_count[h] >= energy_throughput[h] / bess_config["capacity_mwh"], f"Cycle_Count_{h}"
+        prob += cycle_count[h] >= bess_config["min_cycle_count"], f"Min_Cycle_Count_{h}"
+        
+        # Calculate degradation cost based on throughput and DoD
+        # Linear degradation cost model: cost = m * DoD + b
+        slope = bess_config["degradation_cost_slope"]
+        intercept = bess_config["degradation_cost_intercept"]
+        
+        # Simplified degradation cost calculation - using current max DoD for all cycles
+        # In a more sophisticated model, we would track each cycle's DoD separately
+        prob += degradation_cost[h] >= cycle_count[h] * (slope * max_dod + intercept), f"Degradation_Cost_{h}"
 
     # --- Solve ---
     solver = pulp.PULP_CBC_CMD(msg=False) 
@@ -76,7 +158,10 @@ def optimize_day_ahead_arbitrage(bess_config: dict, prices_df: pd.DataFrame) -> 
     status = pulp.LpStatus[prob.status]
     if status == 'Optimal':
         schedule = []
-        total_revenue = pulp.value(prob.objective)
+        total_revenue = pulp.value(revenue)
+        total_degradation = pulp.value(total_degradation_cost)
+        net_revenue = pulp.value(prob.objective)
+        
         for h in hours:
             schedule.append({
                 'HourEnding': prices_df.loc[h, 'HourEnding'],
@@ -84,13 +169,28 @@ def optimize_day_ahead_arbitrage(bess_config: dict, prices_df: pd.DataFrame) -> 
                 'ChargePower_MW': charge_power[h].varValue,
                 'DischargePower_MW': discharge_power[h].varValue,
                 'SoC_MWh_End': soc_mwh[h+1].varValue,
-                'SoC_Percent_End': (soc_mwh[h+1].varValue / bess_config["capacity_mwh"]) * 100
+                'SoC_Percent_End': (soc_mwh[h+1].varValue / bess_config["capacity_mwh"]) * 100,
+                'CycleFraction': cycle_count[h].varValue if h in cycle_count else 0,
+                'DegradationCost': degradation_cost[h].varValue if h in degradation_cost else 0
             })
+        
         schedule_df = pd.DataFrame(schedule)
-        return status, schedule_df, total_revenue
+        
+        # Add summary data to the results
+        result_data = {
+            'status': status,
+            'schedule_df': schedule_df,
+            'total_revenue': total_revenue,
+            'degradation_cost': total_degradation,
+            'net_revenue': net_revenue,
+            'total_cycles': sum(cycle_count[h].varValue for h in hours),
+            'max_dod_percent': max_dod.varValue * 100 if max_dod.varValue else 0
+        }
+        
+        return status, schedule_df, net_revenue, result_data
     else:
         print(f"Deterministic optimization failed with status: {status}")
-        return status, None, None
+        return status, None, None, None
 
 # --- NEW: Scenario Generation Placeholder ---
 def generate_rtm_price_scenarios(dam_prices_df: pd.DataFrame, num_scenarios: int, noise_std_dev: float = 5.0) -> dict:
@@ -122,10 +222,10 @@ def generate_rtm_price_scenarios(dam_prices_df: pd.DataFrame, num_scenarios: int
     print(f"Generated {num_scenarios} RTM price scenarios with std dev {noise_std_dev}.")
     return scenarios
 
-# --- NEW: Two-Stage Stochastic Optimization Logic ---
+# --- NEW: Two-Stage Stochastic Optimization Logic with Degradation ---
 def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame, rtm_scenarios: dict) -> tuple:
     """
-    Optimizes BESS dispatch using a two-stage stochastic model.
+    Optimizes BESS dispatch using a two-stage stochastic model with degradation costs.
     Stage 1: DAM Charge/Discharge decisions (here-and-now).
     Stage 2: RTM Charge/Discharge adjustments & SoC (wait-and-see, per scenario).
 
@@ -135,10 +235,11 @@ def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame
         rtm_scenarios: Dictionary {scenario_index: pd.Series(RTM_LMP)}
 
     Returns:
-        A tuple containing: (status, dam_schedule_df, expected_revenue)
+        A tuple containing: (status, dam_schedule_df, expected_revenue, result_data)
         status (str): PuLP solver status.
         dam_schedule_df (pd.DataFrame or None): DataFrame with optimal Stage 1 (DAM) schedule.
         expected_revenue (float or None): Calculated maximum expected revenue across scenarios.
+        result_data (dict): Additional result data including degradation costs.
     """
     num_scenarios = len(rtm_scenarios)
     if num_scenarios == 0:
@@ -166,20 +267,47 @@ def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame
     # SoC exists for hour 0 through final hour, per scenario
     soc_mwh = pulp.LpVariable.dicts("SoC", [(t, s) for t in range(len(hours) + 1) for s in scenarios_idx], 
                                    lowBound=bess_config["min_soc_mwh"], upBound=bess_config["max_soc_mwh"], cat='Continuous')
+    
+    # --- Degradation Modeling Variables ---
+    # Total energy throughput variables (per hour, per scenario)
+    energy_throughput = pulp.LpVariable.dicts("EnergyThroughput", [(h, s) for h in hours for s in scenarios_idx], lowBound=0, cat='Continuous')
+    
+    # Variables to track SoC changes for DoD calculation (per hour, per scenario)
+    soc_decrease = pulp.LpVariable.dicts("SoC_Decrease", [(h, s) for h in hours for s in scenarios_idx], lowBound=0, cat='Continuous')
+    
+    # Maximum DoD per scenario
+    max_dod = pulp.LpVariable.dicts("Max_DoD", scenarios_idx, lowBound=0, upBound=1, cat='Continuous')
+    
+    # Expected maximum DoD across all scenarios
+    expected_max_dod = pulp.LpVariable("Expected_Max_DoD", lowBound=0, upBound=1, cat='Continuous')
+    
+    # Cycle counting variable (per hour, per scenario)
+    cycle_count = pulp.LpVariable.dicts("CycleCount", [(h, s) for h in hours for s in scenarios_idx], lowBound=0, cat='Continuous')
+    
+    # Degradation cost variable (per hour, per scenario)
+    degradation_cost = pulp.LpVariable.dicts("DegradationCost", [(h, s) for h in hours for s in scenarios_idx], lowBound=0, cat='Continuous')
 
-    # --- Objective Function (Maximize Expected Profit) ---
-    # Expected Profit = DAM Profit + Sum over scenarios [ Prob(s) * RTM Profit(s) ]
-    dam_profit = pulp.lpSum(
+    # --- Objective Function (Maximize Expected Net Profit) ---
+    # DAM Revenue
+    dam_revenue = pulp.lpSum(
         (dam_discharge_power[h] - dam_charge_power[h]) * dam_prices_df.loc[h, 'LMP'] 
         for h in hours
     )
     
-    expected_rtm_profit = pulp.lpSum(
-        scenario_probability * (rtm_discharge_power[h, s] - rtm_charge_power[h, s]) * rtm_scenarios[s].iloc[h] # Use .iloc for Series access by position
+    # Expected RTM Revenue
+    expected_rtm_revenue = pulp.lpSum(
+        scenario_probability * (rtm_discharge_power[h, s] - rtm_charge_power[h, s]) * rtm_scenarios[s].iloc[h]
         for h in hours for s in scenarios_idx
     )
-
-    prob += dam_profit + expected_rtm_profit, "Total_Expected_Revenue"
+    
+    # Expected Degradation Cost
+    expected_degradation_cost = pulp.lpSum(
+        scenario_probability * degradation_cost[h, s]
+        for h in hours for s in scenarios_idx
+    )
+    
+    # Total Expected Net Profit
+    prob += dam_revenue + expected_rtm_revenue - expected_degradation_cost, "Total_Expected_Net_Revenue"
 
     # --- Constraints ---
     # ** Stage 1 Constraints **
@@ -192,6 +320,12 @@ def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame
     # ** Stage 2 Constraints (Applied PER SCENARIO) **
     discharge_efficiency_inverse = 1.0 / bess_config["discharge_efficiency"]
     charge_efficiency = bess_config["charge_efficiency"]
+    min_efficiency = min(charge_efficiency, bess_config["discharge_efficiency"])
+    
+    # Expected max DoD calculation
+    prob += expected_max_dod == pulp.lpSum(
+        scenario_probability * max_dod[s] for s in scenarios_idx
+    ), "Expected_Max_DoD_Calculation"
     
     for s in scenarios_idx:
         # Initial SoC (same for all scenarios)
@@ -210,10 +344,28 @@ def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame
             prob += total_charge <= bess_config["max_charge_power_mw"], f"MaxChargeLimit_Hour_{h}_Scenario_{s}"
             prob += total_discharge <= bess_config["max_discharge_power_mw"], f"MaxDischargeLimit_Hour_{h}_Scenario_{s}"
             
-            # Prevent simultaneous RTM charge and discharge *adjustments*? 
-            # Adding constraints to prevent simultaneous RTM adjustments might be complex
-            # and depends on market rules. Let's assume net RTM adjustment is possible for now.
-            # If needed, add binary vars for RTM charge/discharge per scenario & link them.
+            # Energy throughput calculation
+            prob += energy_throughput[h, s] == total_charge * min_efficiency, f"Energy_Throughput_Hour_{h}_Scenario_{s}"
+            
+            # Calculate SoC decrease for DoD tracking
+            if h > 0:
+                prob += soc_decrease[h, s] >= soc_mwh[(h, s)] - soc_mwh[(h+1, s)], f"SoC_Decrease_Hour_{h}_Scenario_{s}"
+                
+                # Track maximum DoD (as a fraction of usable capacity)
+                usable_capacity = bess_config["max_soc_mwh"] - bess_config["min_soc_mwh"]
+                prob += max_dod[s] >= soc_decrease[h, s] / usable_capacity, f"Max_DoD_Constraint_Hour_{h}_Scenario_{s}"
+            
+            # Calculate cycle fraction
+            prob += cycle_count[h, s] >= energy_throughput[h, s] / bess_config["capacity_mwh"], f"Cycle_Count_Hour_{h}_Scenario_{s}"
+            prob += cycle_count[h, s] >= bess_config["min_cycle_count"], f"Min_Cycle_Count_Hour_{h}_Scenario_{s}"
+            
+            # Calculate degradation cost based on throughput and DoD
+            # Linear degradation cost model: cost = m * DoD + b
+            slope = bess_config["degradation_cost_slope"]
+            intercept = bess_config["degradation_cost_intercept"]
+            
+            # Simplified degradation cost calculation - using current max DoD for this scenario
+            prob += degradation_cost[h, s] >= cycle_count[h, s] * (slope * max_dod[s] + intercept), f"Degradation_Cost_Hour_{h}_Scenario_{s}"
 
     # --- Solve ---
     solver = pulp.PULP_CBC_CMD(msg=False) 
@@ -224,23 +376,64 @@ def optimize_two_stage_stochastic(bess_config: dict, dam_prices_df: pd.DataFrame
     if status == 'Optimal':
         # Extract the Stage 1 (DAM) schedule - this is the primary output
         dam_schedule = []
-        expected_revenue = pulp.value(prob.objective)
+        
+        # Get objective components
+        dam_revenue_value = pulp.lpSum(
+            (dam_discharge_power[h].varValue - dam_charge_power[h].varValue) * dam_prices_df.loc[h, 'LMP'] 
+            for h in hours
+        ).value()
+        
+        expected_rtm_revenue_value = pulp.lpSum(
+            scenario_probability * (rtm_discharge_power[h, s].varValue - rtm_charge_power[h, s].varValue) * rtm_scenarios[s].iloc[h]
+            for h in hours for s in scenarios_idx
+        ).value()
+        
+        expected_degradation_cost_value = pulp.lpSum(
+            scenario_probability * degradation_cost[h, s].varValue
+            for h in hours for s in scenarios_idx
+        ).value()
+        
+        expected_net_revenue = pulp.value(prob.objective)
+        
+        # Calculate average cycle count per scenario
+        avg_cycle_count = sum(
+            scenario_probability * sum(cycle_count[h, s].varValue for h in hours)
+            for s in scenarios_idx
+        )
+        
+        # Calculate expected max DoD
+        expected_max_dod_value = pulp.value(expected_max_dod)
+        
+        # Build schedule dataframe
         for h in hours:
             dam_schedule.append({
                 'HourEnding': dam_prices_df.loc[h, 'HourEnding'],
                 'DAM_LMP': dam_prices_df.loc[h, 'LMP'], # Include DAM price for context
                 'DAM_ChargePower_MW': dam_charge_power[h].varValue,
                 'DAM_DischargePower_MW': dam_discharge_power[h].varValue,
-                # Add RTM price stats if useful? e.g. avg RTM price for this hour
-                'Avg_RTM_LMP_Scenario': sum(rtm_scenarios[s].iloc[h] for s in scenarios_idx) / num_scenarios
+                # Add RTM price stats for context
+                'Avg_RTM_LMP_Scenario': sum(rtm_scenarios[s].iloc[h] for s in scenarios_idx) / num_scenarios,
+                # Add average degradation cost across scenarios for this hour
+                'Avg_Degradation_Cost': sum(scenario_probability * degradation_cost[h, s].varValue for s in scenarios_idx)
             })
+        
         dam_schedule_df = pd.DataFrame(dam_schedule)
         
-        # Note: We are not returning the detailed Stage 2 variables 
-        return status, dam_schedule_df, expected_revenue
+        # Prepare additional result data
+        result_data = {
+            'dam_revenue': dam_revenue_value,
+            'expected_rtm_revenue': expected_rtm_revenue_value,
+            'expected_degradation_cost': expected_degradation_cost_value,
+            'expected_net_revenue': expected_net_revenue,
+            'avg_cycle_count': avg_cycle_count,
+            'expected_max_dod_percent': expected_max_dod_value * 100 if expected_max_dod_value else 0,
+            'rtm_scenario_prices': rtm_scenarios
+        }
+        
+        return status, dam_schedule_df, expected_net_revenue, result_data
     else:
         print(f"Stochastic optimization failed with status: {status}")
-        return status, None, None
+        return status, None, None, None
 
 # --- Data Fetching and Processing Function ---
 def fetch_and_process_dam_prices(settlement_point: str, target_date: datetime.date) -> pd.DataFrame:
@@ -249,56 +442,34 @@ def fetch_and_process_dam_prices(settlement_point: str, target_date: datetime.da
     Returns a cleaned DataFrame with 'HourEnding' (datetime) and 'LMP' (float).
     Raises ERCOTAPIError or ValueError on failure.
     """
-    print(f"Fetching Day-Ahead prices for {target_date} at {settlement_point}...")
-    price_data = fetch_day_ahead_prices(settlement_point=settlement_point, delivery_date=target_date, debug=False)
-
-    if not price_data or not price_data.get("data") or not price_data.get("fields"):
-        raise ValueError("Failed to fetch price data, or 'data'/'fields' key missing in response.")
-
-    # Extract column names
     try:
-        column_names = [field['name'] for field in price_data['fields']]
-    except (TypeError, KeyError) as e:
-        raise ValueError(f"Error parsing 'fields' key: {e}")
-
-    # Create DataFrame
-    prices = pd.DataFrame(price_data["data"], columns=column_names)
-
-    # Validation and Processing
-    required_date_col = 'deliveryDate'
-    required_time_col = 'hourEnding'
-    required_price_col = 'settlementPointPrice'
-
-    missing_cols = [col for col in [required_date_col, required_time_col, required_price_col] if col not in prices.columns]
-    if missing_cols:
-        raise ValueError(f"Missing required columns {missing_cols}. Available: {list(prices.columns)}")
-
-    # Combine Date and Hour
-    try:
-        datetime_str = prices[required_date_col].astype(str) + ' ' + prices[required_time_col].astype(str)
-        datetime_str_corrected = datetime_str.str.replace(' 24:00', ' 00:00')
-        prices['HourEnding'] = pd.to_datetime(datetime_str_corrected, format='%Y-%m-%d %H:%M', errors='coerce')
-        mask_hour_24 = datetime_str.str.contains(' 24:00')
-        prices.loc[mask_hour_24, 'HourEnding'] += timedelta(days=1)
+        print(f"Fetching Day-Ahead prices for {target_date} at {settlement_point}...")
+        raw_prices = fetch_day_ahead_prices(settlement_point=settlement_point, operating_date=target_date)
+        
+        # Ensure data for 24 hours
+        if len(raw_prices) != 24:
+            print(f"Warning: Expected 24 hourly prices, but got {len(raw_prices)}")
+            
+        # Process raw prices into a DataFrame
+        processed_prices = []
+        for i, p in enumerate(raw_prices):
+            # Create proper datetime for HourEnding
+            hour_ending = datetime.combine(target_date, datetime.min.time()) + timedelta(hours=i+1)
+            processed_prices.append({
+                'HourEnding': hour_ending,
+                'LMP': float(p['SettlementPointPrice'])
+            })
+        
+        df = pd.DataFrame(processed_prices)
+        print(f"Successfully fetched and processed {len(df)} hourly prices.")
+        return df
+    
+    except ERCOTAPIError as e:
+        raise ERCOTAPIError(f"Failed to fetch DAM prices: {e}")
     except Exception as e:
-        raise ValueError(f"Error creating timestamp: {e}")
+        raise ValueError(f"Error processing DAM prices: {e}")
 
-    prices.dropna(subset=['HourEnding'], inplace=True)
-
-    # Convert price to numeric
-    prices['LMP'] = pd.to_numeric(prices[required_price_col], errors='coerce')
-    prices.dropna(subset=['LMP'], inplace=True)
-
-    # Select and sort
-    prices = prices[['HourEnding', 'LMP']].sort_values(by='HourEnding').reset_index(drop=True)
-
-    if prices.empty:
-        raise ValueError("No valid price data found after processing.")
-
-    print(f"Successfully fetched and processed {len(prices)} hourly prices.")
-    return prices
-
-# --- UPDATED: Main Runner Function ---
+# --- Main Pipeline Function to Orchestrate the Process ---
 def run_optimization_pipeline(
     target_date: datetime.date, 
     settlement_point: str,
@@ -307,91 +478,96 @@ def run_optimization_pipeline(
     noise_std_dev: float = 5.0 # Used only if type is stochastic
     ) -> dict:
     """
-    Runs the full pipeline: load config, fetch/process data, run optimization.
-    Can run either deterministic or two-stage stochastic optimization.
+    Orchestrates the full BESS optimization pipeline, from data fetching to result processing.
     
     Args:
-        target_date: The date for which to optimize.
-        settlement_point: The ERCOT settlement point.
-        optimization_type: 'deterministic' or 'stochastic'.
-        num_scenarios: Number of RTM scenarios for stochastic mode.
-        noise_std_dev: Standard deviation for RTM scenario price noise.
-
+        target_date: The operating date to optimize for.
+        settlement_point: The ERCOT settlement point to fetch prices for.
+        optimization_type: 'deterministic' for perfect foresight, 'stochastic' for two-stage stochastic.
+        num_scenarios: Number of price scenarios to generate (stochastic only).
+        noise_std_dev: Standard deviation of price noise for scenario generation (stochastic only).
+        
     Returns:
-        A dictionary containing results:
-        {
-            'success': bool,
-            'optimization_type': str,
-            'bess_config': dict | None,
-            'dam_prices_df': pd.DataFrame | None,
-            'rtm_scenario_prices': dict | None, # Dict {scen_idx: pd.Series(LMP)}
-            'status': str | None,
-            'schedule_df': pd.DataFrame | None, # DAM schedule for stochastic, full schedule for deterministic
-            'total_revenue': float | None, # Actual revenue for deterministic
-            'expected_revenue': float | None, # Expected revenue for stochastic
-            'error_message': str | None
-        }
+        A dictionary containing results and optimization outputs.
     """
-    results = {
-        'success': False,
-        'optimization_type': optimization_type,
-        'bess_config': None,
-        'dam_prices_df': None,
-        'rtm_scenario_prices': None, 
-        'status': None,
-        'schedule_df': None, 
-        'total_revenue': None, 
-        'expected_revenue': None, 
-        'error_message': None
-    }
     try:
+        # Standardize parameters
+        target_date = pd.to_datetime(target_date).date()
+        settlement_point = settlement_point.strip().upper()
+        optimization_type = optimization_type.lower()
+        
         # Load BESS configuration
-        bess_params = load_bess_config()
-        results['bess_config'] = bess_params
-
-        # Fetch and Process DAM Data (needed for both types)
+        bess_config = load_bess_config()
+        
+        # Fetch & process DAM prices
         dam_prices_df = fetch_and_process_dam_prices(settlement_point, target_date)
-        results['dam_prices_df'] = dam_prices_df
         
-        if optimization_type == 'stochastic':
-            print(f"\nRunning Two-Stage Stochastic Optimization with {num_scenarios} scenarios...")
-            # Generate RTM Scenarios (Placeholder)
-            rtm_scenarios = generate_rtm_price_scenarios(dam_prices_df, num_scenarios, noise_std_dev)
-            results['rtm_scenario_prices'] = rtm_scenarios # Store for potential display
-
-            # Run Stochastic Optimization
-            opt_status, dam_schedule_df, expected_revenue = optimize_two_stage_stochastic(bess_params, dam_prices_df, rtm_scenarios)
-            results['status'] = opt_status
-            results['schedule_df'] = dam_schedule_df # This is the DAM schedule
-            results['expected_revenue'] = expected_revenue
-            if opt_status == 'Optimal':
-                results['success'] = True
-            else:
-                 results['error_message'] = f"Stochastic optimization finished with status: {opt_status}"
-
-        elif optimization_type == 'deterministic':
-             print("\nRunning Deterministic Optimization...")
-             # Run Deterministic Optimization
-             opt_status, schedule_df, total_revenue = optimize_day_ahead_arbitrage(bess_params, dam_prices_df)
-             results['status'] = opt_status
-             results['schedule_df'] = schedule_df # Full schedule
-             results['total_revenue'] = total_revenue
-             if opt_status == 'Optimal':
-                 results['success'] = True
-             else:
-                  results['error_message'] = f"Deterministic optimization finished with status: {opt_status}"
-        else:
-             raise ValueError(f"Unknown optimization_type: {optimization_type}")
+        # Perform optimization based on type
+        if optimization_type == 'deterministic':
+            print("Running Deterministic Optimization...")
+            status, schedule_df, total_revenue, result_data = optimize_day_ahead_arbitrage(bess_config, dam_prices_df)
             
-    except (ERCOTAPIError, ValueError, FileNotFoundError, ImportError) as e:
-        print(f"Error during optimization pipeline: {e}")
-        results['error_message'] = str(e)
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        print(traceback.format_exc()) 
-        results['error_message'] = f"An unexpected error occurred: {e}"
+            results = {
+                'success': status == 'Optimal',
+                'status': status,
+                'schedule_df': schedule_df,
+                'dam_prices_df': dam_prices_df,
+                'total_revenue': total_revenue,
+                'error_message': None if status == 'Optimal' else "Optimization failed to find optimal solution."
+            }
+            
+            # Add degradation data if available
+            if result_data:
+                results.update({
+                    'degradation_cost': result_data.get('degradation_cost', 0),
+                    'net_revenue': result_data.get('net_revenue', 0),
+                    'total_cycles': result_data.get('total_cycles', 0),
+                    'max_dod_percent': result_data.get('max_dod_percent', 0)
+                })
+            
+        elif optimization_type == 'stochastic':
+            print(f"Running Two-Stage Stochastic Optimization with {num_scenarios} scenarios...")
+            # Generate RTM scenarios
+            rtm_scenarios = generate_rtm_price_scenarios(dam_prices_df, num_scenarios, noise_std_dev)
+            
+            # Run stochastic optimization
+            status, schedule_df, expected_revenue, result_data = optimize_two_stage_stochastic(bess_config, dam_prices_df, rtm_scenarios)
+            
+            results = {
+                'success': status == 'Optimal',
+                'status': status,
+                'schedule_df': schedule_df,
+                'dam_prices_df': dam_prices_df,
+                'expected_revenue': expected_revenue,
+                'rtm_scenario_prices': rtm_scenarios if status == 'Optimal' else None,
+                'error_message': None if status == 'Optimal' else "Optimization failed to find optimal solution."
+            }
+            
+            # Add degradation data if available
+            if result_data:
+                results.update({
+                    'dam_revenue': result_data.get('dam_revenue', 0),
+                    'expected_rtm_revenue': result_data.get('expected_rtm_revenue', 0),
+                    'expected_degradation_cost': result_data.get('expected_degradation_cost', 0),
+                    'avg_cycle_count': result_data.get('avg_cycle_count', 0),
+                    'expected_max_dod_percent': result_data.get('expected_max_dod_percent', 0)
+                })
+            
+        else:
+            raise ValueError(f"Invalid optimization_type: {optimization_type}. Must be 'deterministic' or 'stochastic'.")
+            
+        return results
         
-    return results
+    except Exception as e:
+        print(f"Pipeline Error: {e}")
+        traceback.print_exc()
+        return {
+            'success': False,
+            'status': 'Error',
+            'error_message': str(e),
+            'schedule_df': None,
+            'dam_prices_df': None
+        }
 
 # --- Main Execution Block (UPDATED for testing both modes) ---
 if __name__ == "__main__":
