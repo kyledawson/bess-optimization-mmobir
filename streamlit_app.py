@@ -204,19 +204,17 @@ def render_bess_guide_tab():
     st.subheader("Our Optimization Approach")
     
     st.markdown("""
-    <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div class="explanation-box">
-            <h4>Two-Stage Stochastic Optimization</h4>
-            <p>Our approach differentiates between Day-Ahead decisions (which must be made in advance) and Real-Time adjustments 
-            (which can respond to actual price conditions):</p>
-            <ul>
-                <li><b>Stage 1 (Day-Ahead Market)</b>: Determine optimal charge/discharge schedule for the DAM based on forecasted 
-                prices and considering future uncertainty</li>
-                <li><b>Stage 2 (Real-Time Market)</b>: Model potential RTM price scenarios and optimize adjustments for each scenario</li>
-            </ul>
-            <p>By considering multiple RTM price scenarios, the model finds a robust DAM strategy that performs well 
-            under various possible future price conditions.</p>
-        </div>
+    <div class="explanation-box">
+        <h4>Two-Stage Stochastic Optimization</h4>
+        <p>Our approach differentiates between Day-Ahead decisions (which must be made in advance) and Real-Time adjustments 
+        (which can respond to actual price conditions):</p>
+        <ul>
+            <li><b>Stage 1 (Day-Ahead Market)</b>: Determine optimal charge/discharge schedule for the DAM based on forecasted 
+            prices and considering future uncertainty</li>
+            <li><b>Stage 2 (Real-Time Market)</b>: Model potential RTM price scenarios and optimize adjustments for each scenario</li>
+        </ul>
+        <p>By considering multiple RTM price scenarios, the model finds a robust DAM strategy that performs well 
+        under various possible future price conditions.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -243,35 +241,39 @@ def render_bess_guide_tab():
     st.subheader("How It Works")
     
     st.markdown("""
-    <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div class="explanation-box">
-            <h4>1. Data Acquisition</h4>
-            <p>Fetches Day-Ahead Market (DAM) prices from ERCOT API for the selected settlement point and date.</p>
-        </div>
-        
-        <div class="explanation-box">
-            <h4>2. Scenario Generation</h4>
-            <p>Creates multiple Real-Time Market (RTM) price scenarios by adding random noise to DAM prices. 
-            These scenarios represent the uncertainty in RTM prices that will materialize the next day.</p>
-            <p>The noise level can be adjusted to model different degrees of price volatility in the market.</p>
-        </div>
-        
-        <div class="explanation-box">
-            <h4>3. Mathematical Optimization</h4>
-            <p>Formulates a linear programming problem using PuLP to maximize expected revenue:</p>
-            <ul>
-                <li><b>Decision Variables</b>: When and how much to charge/discharge in the DAM, and what adjustments to make in each RTM scenario</li>
-                <li><b>Constraints</b>: Battery capacity, power limits, state of charge limits, and energy conservation equations</li>
-                <li><b>Objective</b>: Maximize expected profit across all scenarios (weighted by probability)</li>
-            </ul>
-        </div>
-        
-        <div class="explanation-box">
-            <h4>4. Result Interpretation</h4>
-            <p>The "Optimal Expected Revenue" represents the weighted average profit across all RTM scenarios, 
-            given the optimal DAM bidding strategy. Even if the DAM schedule shows only charging, the expected 
-            revenue includes anticipated profits from discharging in the RTM under various price scenarios.</p>
-        </div>
+    <div class="explanation-box">
+        <h4>1. Data Acquisition</h4>
+        <p>Fetches Day-Ahead Market (DAM) prices from ERCOT API for the selected settlement point and date.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="explanation-box">
+        <h4>2. Scenario Generation</h4>
+        <p>Creates multiple Real-Time Market (RTM) price scenarios by adding random noise to DAM prices. 
+        These scenarios represent the uncertainty in RTM prices that will materialize the next day.</p>
+        <p>The noise level can be adjusted to model different degrees of price volatility in the market.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="explanation-box">
+        <h4>3. Mathematical Optimization</h4>
+        <p>Formulates a linear programming problem using PuLP to maximize expected revenue:</p>
+        <ul>
+            <li><b>Decision Variables</b>: When and how much to charge/discharge in the DAM, and what adjustments to make in each RTM scenario</li>
+            <li><b>Constraints</b>: Battery capacity, power limits, state of charge limits, and energy conservation equations</li>
+            <li><b>Objective</b>: Maximize expected profit across all scenarios (weighted by probability)</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="explanation-box">
+        <h4>4. Result Interpretation</h4>
+        <p>The "Optimal Expected Revenue" represents the weighted average profit across all RTM scenarios, 
+        given the optimal DAM bidding strategy. Even if the DAM schedule shows only charging, the expected 
+        revenue includes anticipated profits from discharging in the RTM under various price scenarios.</p>
     </div>
     """, unsafe_allow_html=True)
     
