@@ -238,87 +238,91 @@ def render_bess_guide_tab():
         </div>
         """, unsafe_allow_html=True)
     
-    # Add new section on technical formulation
+    # Add new section on technical formulation with corrected formatting
     st.subheader("Mathematical Formulation")
     
+    st.markdown("### Deterministic Model (Perfect Foresight)")
+    
+    st.markdown("**Decision Variables:**")
     st.markdown("""
-    <div class="explanation-box">
-        <h4>Deterministic Model (Perfect Foresight)</h4>
-        <p><b>Decision Variables:</b></p>
-        <ul>
-            <li>Charge Power (MW) for each hour h: <code>charge_power[h] ≥ 0</code></li>
-            <li>Discharge Power (MW) for each hour h: <code>discharge_power[h] ≥ 0</code></li>
-            <li>State of Charge (MWh) at end of each hour h: <code>soc[h]</code></li>
-            <li>Binary variable indicating charging mode: <code>is_charging[h] ∈ {0,1}</code></li>
-        </ul>
-        
-        <p><b>Objective Function:</b></p>
-        <p>Maximize: <code>∑(h) (discharge_power[h] - charge_power[h]) × LMP[h]</code></p>
-        <p>This represents the net revenue from buying and selling energy at known prices.</p>
-        
-        <p><b>Key Constraints:</b></p>
-        <ul>
-            <li><b>Initial SoC:</b> <code>soc[0] = initial_soc_mwh</code></li>
-            <li><b>SoC Evolution:</b> <code>soc[h+1] = soc[h] + (charge_power[h] × charge_efficiency) - (discharge_power[h] / discharge_efficiency)</code></li>
-            <li><b>SoC Limits:</b> <code>min_soc_mwh ≤ soc[h] ≤ max_soc_mwh</code></li>
-            <li><b>Power Limits:</b> <code>charge_power[h] ≤ max_charge_power_mw</code> and <code>discharge_power[h] ≤ max_discharge_power_mw</code></li>
-            <li><b>No Simultaneous Charging/Discharging:</b> Uses binary variable <code>is_charging[h]</code> to prevent charging and discharging in the same hour</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    * Charge Power (MW) for each hour h: `charge_power[h] ≥ 0`
+    * Discharge Power (MW) for each hour h: `discharge_power[h] ≥ 0`
+    * State of Charge (MWh) at end of each hour h: `soc[h]`
+    * Binary variable indicating charging mode: `is_charging[h] ∈ {0,1}`
+    """)
+    
+    st.markdown("**Objective Function:**")
+    st.markdown("Maximize: `∑(h) (discharge_power[h] - charge_power[h]) × LMP[h]`")
+    st.markdown("This represents the net revenue from buying and selling energy at known prices.")
+    
+    st.markdown("**Key Constraints:**")
+    st.markdown("""
+    * **Initial SoC:** `soc[0] = initial_soc_mwh`
+    * **SoC Evolution:** `soc[h+1] = soc[h] + (charge_power[h] × charge_efficiency) - (discharge_power[h] / discharge_efficiency)`
+    * **SoC Limits:** `min_soc_mwh ≤ soc[h] ≤ max_soc_mwh`
+    * **Power Limits:** `charge_power[h] ≤ max_charge_power_mw` and `discharge_power[h] ≤ max_discharge_power_mw`
+    * **No Simultaneous Charging/Discharging:** Uses binary variable `is_charging[h]` to prevent charging and discharging in the same hour
+    """)
+    
+    st.markdown("---")
+    
+    st.markdown("### Stochastic Model (Two-Stage)")
+    
+    st.markdown("**Decision Variables:**")
+    st.markdown("""
+    * **Stage 1 (DAM):** `dam_charge_power[h], dam_discharge_power[h]` for each hour h
+    * **Stage 2 (RTM):** `rtm_charge_power[h,s], rtm_discharge_power[h,s]` for each hour h and scenario s
+    * **State of Charge:** `soc[h,s]` for each hour h and scenario s
+    """)
+    
+    st.markdown("**Objective Function:**")
+    st.markdown("""
+    Maximize: 
+    ```
+    ∑(h) (dam_discharge_power[h] - dam_charge_power[h]) × DAM_LMP[h] + 
+    ∑(s) probability[s] × ∑(h) (rtm_discharge_power[h,s] - rtm_charge_power[h,s]) × RTM_LMP[h,s]
+    ```
+    """)
+    st.markdown("This represents the combined revenue from DAM operations plus the expected value of RTM adjustments.")
+    
+    st.markdown("**Key Constraints:**")
+    st.markdown("""
+    * **Initial SoC:** `soc[0,s] = initial_soc_mwh` for all scenarios s
+    * **SoC Evolution:** 
+      ```
+      soc[h+1,s] = soc[h,s] + (dam_charge_power[h] + rtm_charge_power[h,s]) × charge_efficiency - 
+      (dam_discharge_power[h] + rtm_discharge_power[h,s]) / discharge_efficiency
+      ```
+    * **SoC Limits:** `min_soc_mwh ≤ soc[h,s] ≤ max_soc_mwh` for all h and s
+    * **Power Limits:** Combined DAM and RTM power must respect battery limits
+    * **Non-Anticipativity:** Stage 1 decisions (DAM) must be the same across all scenarios
+    """)
+    
+    st.markdown("---")
+    
+    st.markdown("### Interpreting Optimization Results")
+    
+    st.markdown("**Deterministic Results:**")
+    st.markdown("""
+    * The optimal schedule shows when to charge (green bars) and discharge (red bars) in the DAM
+    * The "Optimal Deterministic Revenue" is the maximum profit achievable with perfect price knowledge
+    * State of Charge (%) line shows battery energy level throughout the day
+    """)
+    
+    st.markdown("**Stochastic Results:**")
+    st.markdown("""
+    * The chart shows only the Stage 1 (DAM) decisions - what to bid in the day-ahead market
+    * Even if only charging appears in the DAM schedule, the "Optimal Expected Revenue" includes anticipated 
+      profits from discharging in the RTM under various price scenarios
+    * The orange dotted line shows the average RTM price across scenarios, which influences the optimal DAM strategy
+    * The DAM schedule represents a robust strategy that performs well across all potential RTM price scenarios
+    """)
     
     st.markdown("""
-    <div class="explanation-box">
-        <h4>Stochastic Model (Two-Stage)</h4>
-        <p><b>Decision Variables:</b></p>
-        <ul>
-            <li><b>Stage 1 (DAM):</b> <code>dam_charge_power[h], dam_discharge_power[h]</code> for each hour h</li>
-            <li><b>Stage 2 (RTM):</b> <code>rtm_charge_power[h,s], rtm_discharge_power[h,s]</code> for each hour h and scenario s</li>
-            <li><b>State of Charge:</b> <code>soc[h,s]</code> for each hour h and scenario s</li>
-        </ul>
-        
-        <p><b>Objective Function:</b></p>
-        <p>Maximize: <code>∑(h) (dam_discharge_power[h] - dam_charge_power[h]) × DAM_LMP[h] + 
-        ∑(s) probability[s] × ∑(h) (rtm_discharge_power[h,s] - rtm_charge_power[h,s]) × RTM_LMP[h,s]</code></p>
-        <p>This represents the combined revenue from DAM operations plus the expected value of RTM adjustments.</p>
-        
-        <p><b>Key Constraints:</b></p>
-        <ul>
-            <li><b>Initial SoC:</b> <code>soc[0,s] = initial_soc_mwh</code> for all scenarios s</li>
-            <li><b>SoC Evolution:</b> 
-            <code>soc[h+1,s] = soc[h,s] + (dam_charge_power[h] + rtm_charge_power[h,s]) × charge_efficiency - 
-            (dam_discharge_power[h] + rtm_discharge_power[h,s]) / discharge_efficiency</code></li>
-            <li><b>SoC Limits:</b> <code>min_soc_mwh ≤ soc[h,s] ≤ max_soc_mwh</code> for all h and s</li>
-            <li><b>Power Limits:</b> Combined DAM and RTM power must respect battery limits</li>
-            <li><b>Non-Anticipativity:</b> Stage 1 decisions (DAM) must be the same across all scenarios</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="explanation-box">
-        <h4>Interpreting Optimization Results</h4>
-        <p><b>Deterministic Results:</b></p>
-        <ul>
-            <li>The optimal schedule shows when to charge (green bars) and discharge (red bars) in the DAM</li>
-            <li>The "Optimal Deterministic Revenue" is the maximum profit achievable with perfect price knowledge</li>
-            <li>State of Charge (%) line shows battery energy level throughout the day</li>
-        </ul>
-        
-        <p><b>Stochastic Results:</b></p>
-        <ul>
-            <li>The chart shows only the Stage 1 (DAM) decisions - what to bid in the day-ahead market</li>
-            <li>Even if only charging appears in the DAM schedule, the "Optimal Expected Revenue" includes anticipated 
-            profits from discharging in the RTM under various price scenarios</li>
-            <li>The orange dotted line shows the average RTM price across scenarios, which influences the optimal DAM strategy</li>
-            <li>The DAM schedule represents a robust strategy that performs well across all potential RTM price scenarios</li>
-        </ul>
-        
-        <p><b>Key Insight:</b> In stochastic optimization, the DAM schedule represents strategic positioning 
-        (buying at relatively lower prices) to exploit expected higher RTM prices, even if those RTM actions 
-        aren't visible in the DAM schedule chart.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    **Key Insight:** In stochastic optimization, the DAM schedule represents strategic positioning 
+    (buying at relatively lower prices) to exploit expected higher RTM prices, even if those RTM actions 
+    aren't visible in the DAM schedule chart.
+    """)
     
     st.subheader("How It Works")
     
