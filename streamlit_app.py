@@ -74,26 +74,68 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
     price_col = 'DAM_LMP' if is_stochastic else 'LMP'
     charge_col = 'DAM_ChargePower_MW' if is_stochastic else 'ChargePower_MW'
     discharge_col = 'DAM_DischargePower_MW' if is_stochastic else 'DischargePower_MW'
-    soc_col = 'SoC_Percent_End' # Only available for deterministic in current setup
-
+    
+    # Determine SoC column or calculate it if needed
+    if not is_stochastic:
+        soc_col = 'SoC_Percent_End'  # Already available for deterministic
+    else:
+        # For stochastic, check if we have SoC data
+        if 'SoC_Percent_End' in schedule_df.columns:
+            soc_col = 'SoC_Percent_End'
+        else:
+            # Calculate SoC from charge/discharge if not available directly
+            # Get BESS config for capacity and efficiency
+            try:
+                bess_config = load_bess_config()
+                capacity_mwh = bess_config["capacity_mwh"]
+                initial_soc_percent = bess_config["initial_soc_percent"]
+                charge_efficiency = bess_config["charge_efficiency"]
+                discharge_efficiency_inverse = 1.0 / bess_config["discharge_efficiency"]
+                
+                # Calculate SoC in MWh first
+                schedule_df['SoC_MWh_End'] = 0.0
+                current_soc_mwh = capacity_mwh * initial_soc_percent / 100.0  # Initial SoC in MWh
+                
+                for idx, row in schedule_df.iterrows():
+                    # Update SoC based on charge/discharge
+                    charge_mwh = row[charge_col] * charge_efficiency
+                    discharge_mwh = row[discharge_col] * discharge_efficiency_inverse
+                    current_soc_mwh = current_soc_mwh + charge_mwh - discharge_mwh
+                    schedule_df.at[idx, 'SoC_MWh_End'] = current_soc_mwh
+                
+                # Convert to percentage
+                schedule_df['SoC_Percent_End'] = (schedule_df['SoC_MWh_End'] / capacity_mwh) * 100
+                soc_col = 'SoC_Percent_End'
+            except Exception as e:
+                st.warning(f"Could not calculate State of Charge: {e}")
+                soc_col = None
+    
     # Check if essential columns exist in schedule_df
     required_sched_cols = [charge_col, discharge_col]
-    if not is_stochastic:
+    if soc_col:
         required_sched_cols.append(soc_col)
+    
+    missing_cols = [col for col in required_sched_cols if col not in schedule_df.columns]
+    if missing_cols:
+        st.warning(f"Schedule DataFrame missing required columns for charting: {missing_cols}")
+        if soc_col in missing_cols:
+            # We can still proceed without SoC
+            required_sched_cols.remove(soc_col)
+            soc_col = None
+            
     if not all(col in schedule_df.columns for col in required_sched_cols):
-        st.warning(f"Schedule DataFrame missing required columns for charting: {required_sched_cols}")
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
         fig.update_layout(title_text="Price and Dispatch Schedule (Schedule Data Incomplete)", height=600)
         return fig
-        
-    # Create subplots
+    
+    # Create subplots - always use secondary y-axis if we have SoC
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
         vertical_spacing=0.05, 
         row_heights=[0.3, 0.7], 
         specs=[[{"secondary_y": False}], # Row 1 (Price)
-               [{"secondary_y": not is_stochastic}]] # Row 2 (Schedule), add secondary axis only if SoC is plotted
+               [{"secondary_y": soc_col is not None}]] # Row 2 (Schedule), add secondary axis if SoC is available
     )
 
     # --- Subplot 1: Price (DAM LMP) ---
@@ -123,8 +165,8 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
                marker_color='green'),
         row=2, col=1, secondary_y=False
     )
-    # State of Charge (%) - Only for Deterministic currently
-    if not is_stochastic:
+    # State of Charge (%) - Add for both deterministic and stochastic if available
+    if soc_col:
         fig.add_trace(
             go.Scatter(x=schedule_df['HourEnding'], y=schedule_df[soc_col], name='SoC %', 
                        mode='lines+markers', line=dict(color='blue')),
@@ -145,8 +187,11 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
     fig.update_xaxes(showticklabels=False, row=1, col=1)
     fig.update_yaxes(title_text="LMP ($/MWh)", row=1, col=1)
     fig.update_yaxes(title_text="Power (MW)", row=2, col=1, secondary_y=False)
-    if not is_stochastic:
-         fig.update_yaxes(title_text="SoC (%)", row=2, col=1, secondary_y=True, range=[0, 100], showgrid=False)
+    
+    # Add SoC y-axis label if we have SoC data
+    if soc_col:
+        fig.update_yaxes(title_text="SoC (%)", row=2, col=1, secondary_y=True, range=[0, 100], showgrid=False)
+    
     fig.update_xaxes(title_text="Hour Ending", row=2, col=1)
 
     return fig
