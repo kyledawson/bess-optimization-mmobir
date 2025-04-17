@@ -5,6 +5,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import base64
 
+# --- Streamlit Page Configuration ---
+# This must be the first Streamlit command
+st.set_page_config(layout="wide", page_title="BESS Optimization Dashboard")
+
 # Import the refactored optimizer functions
 # Note: Ensure bess_optimizer.py has been updated for stochastic mode
 from bess_optimizer import run_optimization_pipeline, load_bess_config
@@ -17,9 +21,6 @@ def load_css(css_file):
 
 css = load_css('style.css')
 st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
-
-# --- Streamlit Page Configuration ---
-st.set_page_config(layout="wide", page_title="BESS Optimization Dashboard")
 
 # --- Helper Functions ---
 def format_schedule_display(df, opt_type):
