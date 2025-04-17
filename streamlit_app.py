@@ -166,18 +166,60 @@ def render_revenue_explanation():
     </div>
     """, unsafe_allow_html=True)
 
-def render_code_explanation_tab():
-    """Renders the content for the Code Explanation tab."""
-    st.header("Battery Energy Storage System (BESS) Optimization")
+def render_bess_guide_tab():
+    """Renders the content for the BESS Optimization Guide tab."""
+    st.header("Battery Energy Storage System (BESS) Optimization Guide")
     
-    st.subheader("Project Overview")
+    st.subheader("What We're Optimizing")
     st.markdown("""
-    This application optimizes the bidding strategy for a Battery Energy Storage System (BESS) 
-    in the ERCOT electricity market. It determines the optimal times to charge and discharge 
-    the battery to maximize profit from energy arbitrage.
+    This application optimizes the **bidding and operational strategy** for a Battery Energy Storage System (BESS) 
+    participating in the ERCOT electricity market. The core objective is to **maximize revenue** by determining the 
+    optimal times to charge (buy) and discharge (sell) energy, considering both Day-Ahead Market (DAM) and 
+    Real-Time Market (RTM) price variations.
     """)
     
-    st.subheader("Key Features")
+    st.subheader("Why It Matters")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div class="explanation-box">
+            <h4>Economic Value</h4>
+            <p>Effective BESS bidding strategies can significantly increase revenue and ROI for battery projects. 
+            In markets with high price volatility like ERCOT, the difference between optimal and sub-optimal 
+            strategies can represent millions in annual revenue.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="explanation-box">
+            <h4>Grid Stability</h4>
+            <p>Optimized BESS operations support grid reliability by storing energy during low-demand periods 
+            and providing power during peak demand. This helps integrate renewables, reduce peak prices, and 
+            prevent outages during extreme weather events.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.subheader("Our Optimization Approach")
+    
+    st.markdown("""
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="explanation-box">
+            <h4>Two-Stage Stochastic Optimization</h4>
+            <p>Our approach differentiates between Day-Ahead decisions (which must be made in advance) and Real-Time adjustments 
+            (which can respond to actual price conditions):</p>
+            <ul>
+                <li><b>Stage 1 (Day-Ahead Market)</b>: Determine optimal charge/discharge schedule for the DAM based on forecasted 
+                prices and considering future uncertainty</li>
+                <li><b>Stage 2 (Real-Time Market)</b>: Model potential RTM price scenarios and optimize adjustments for each scenario</li>
+            </ul>
+            <p>By considering multiple RTM price scenarios, the model finds a robust DAM strategy that performs well 
+            under various possible future price conditions.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -185,7 +227,7 @@ def render_code_explanation_tab():
         <div class="metric-container">
             <div class="metric-label">Deterministic Optimization</div>
             <div class="metric-value">Perfect Foresight</div>
-            <p>Assumes perfect knowledge of future prices and optimizes accordingly.</p>
+            <p>Assumes perfect knowledge of future prices and optimizes accordingly. Useful as a theoretical upper bound on performance.</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -194,7 +236,7 @@ def render_code_explanation_tab():
         <div class="metric-container">
             <div class="metric-label">Stochastic Optimization</div>
             <div class="metric-value">Price Uncertainty</div>
-            <p>Accounts for uncertainty in real-time prices using multiple scenarios.</p>
+            <p>Accounts for uncertainty in real-time prices using multiple scenarios. More realistic representation of actual market conditions.</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -208,25 +250,27 @@ def render_code_explanation_tab():
         </div>
         
         <div class="explanation-box">
-            <h4>2. Scenario Generation (Stochastic Mode)</h4>
-            <p>Creates multiple Real-Time Market (RTM) price scenarios by adding random noise to DAM prices. The number of scenarios and noise level are configurable.</p>
+            <h4>2. Scenario Generation</h4>
+            <p>Creates multiple Real-Time Market (RTM) price scenarios by adding random noise to DAM prices. 
+            These scenarios represent the uncertainty in RTM prices that will materialize the next day.</p>
+            <p>The noise level can be adjusted to model different degrees of price volatility in the market.</p>
         </div>
         
         <div class="explanation-box">
-            <h4>3. Optimization Model</h4>
+            <h4>3. Mathematical Optimization</h4>
             <p>Formulates a linear programming problem using PuLP to maximize expected revenue:</p>
             <ul>
-                <li><b>Decision Variables</b>: When and how much to charge/discharge the battery</li>
-                <li><b>Constraints</b>: Battery capacity, power limits, state of charge limits</li>
-                <li><b>Objective</b>: Maximize profit (revenue from discharging minus cost of charging)</li>
+                <li><b>Decision Variables</b>: When and how much to charge/discharge in the DAM, and what adjustments to make in each RTM scenario</li>
+                <li><b>Constraints</b>: Battery capacity, power limits, state of charge limits, and energy conservation equations</li>
+                <li><b>Objective</b>: Maximize expected profit across all scenarios (weighted by probability)</li>
             </ul>
         </div>
         
         <div class="explanation-box">
-            <h4>4. Two-Stage Process (Stochastic Mode)</h4>
-            <p><b>Stage 1 (Here-and-Now)</b>: Decides the DAM schedule that must be fixed before knowing actual RTM prices</p>
-            <p><b>Stage 2 (Wait-and-See)</b>: For each RTM price scenario, determines the optimal adjustments</p>
-            <p>The expected revenue considers both stages, weighted by scenario probabilities.</p>
+            <h4>4. Result Interpretation</h4>
+            <p>The "Optimal Expected Revenue" represents the weighted average profit across all RTM scenarios, 
+            given the optimal DAM bidding strategy. Even if the DAM schedule shows only charging, the expected 
+            revenue includes anticipated profits from discharging in the RTM under various price scenarios.</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -242,10 +286,10 @@ def render_code_explanation_tab():
     st.subheader("Battery Parameters")
     st.markdown("""
     The system uses environment variables to configure the BESS parameters:
-    * Capacity (MWh)
-    * Maximum charge/discharge power (MW)
-    * Round-trip efficiency (%)
-    * Minimum/maximum state of charge (%)
+    * Capacity (MWh): Total energy storage capability
+    * Maximum charge/discharge power (MW): Power rating constraints
+    * Round-trip efficiency (%): Energy losses during charging/discharging cycle
+    * Minimum/maximum state of charge (%): Operating range limits to preserve battery life
     """)
 
 # --- App Layout ---
@@ -282,8 +326,11 @@ except Exception as e:
     bess_config_loaded = None
 
 # --- Main Panel with Tabs --- 
-results_tab, explanation_tab = st.tabs(["Optimization Results", "Code Explanation"])
+guide_tab, results_tab = st.tabs(["BESS Optimization Guide", "Optimization Results"])
 
+with guide_tab:
+    render_bess_guide_tab()
+        
 with results_tab:
     if run_button:
         if not settlement_point:
@@ -357,6 +404,3 @@ with results_tab:
 
     else:
         st.info("Select optimization parameters, then click 'Run Optimization'.") 
-        
-with explanation_tab:
-    render_code_explanation_tab() 
