@@ -283,7 +283,12 @@ def render_bess_guide_tab():
     * **bess_optimizer.py**: Core optimization logic, scenario generation, and API integration
     * **ercot_api_fetcher.py**: Functions to fetch and process ERCOT market data
     * **streamlit_app.py**: Interactive web dashboard for visualization and parameter settings
-    """)
+    
+    <div style="margin-top: 20px; padding: 10px; border-radius: 5px; background-color: #f8f9fa; border-left: 5px solid #007aff;">
+        <p><b>👨‍💻 Open Source Project:</b> View the code, contribute, or fork this project on GitHub:</p>
+        <p style="text-align: center;"><a href="https://github.com/MMobir/bess-optimization" target="_blank"><img src="https://img.shields.io/badge/GitHub-BESS%20Optimization-blue?style=for-the-badge&logo=github" alt="GitHub Repository"></a></p>
+    </div>
+    """, unsafe_allow_html=True)
     
     st.subheader("Battery Parameters")
     st.markdown("""
@@ -405,4 +410,16 @@ with results_tab:
                 status_text.text("Optimization Failed.")
 
     else:
-        st.info("Select optimization parameters, then click 'Run Optimization'.") 
+        st.info("Select optimization parameters, then click 'Run Optimization'.")
+
+# Add GitHub link as a footer at the bottom of the app
+st.markdown("""
+---
+<div style="text-align: center; margin-top: 30px; opacity: 0.7;">
+    <p>
+        <a href="https://github.com/MMobir/bess-optimization" target="_blank">
+            <img src="https://img.shields.io/badge/GitHub-BESS%20Optimization-blue?logo=github" alt="GitHub Repository">
+        </a>
+    </p>
+</div>
+""", unsafe_allow_html=True) 
