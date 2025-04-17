@@ -158,7 +158,7 @@ def render_revenue_explanation():
         <h4>Understanding Revenue in Stochastic Optimization</h4>
         <p>The <b>Optimal Expected Revenue</b> shown in the dashboard is calculated using a two-stage stochastic model:</p>
         <ol>
-            <li><b>Stage 1 (Day-Ahead Market)</b>: The chart above shows only the Day-Ahead Market (DAM) schedule - when to charge/discharge in the DAM. This is the "here-and-now" decision.</li>
+            <li><b>Stage 1 (Day-Ahead Market)</b>: The chart below shows only the Day-Ahead Market (DAM) schedule - when to charge/discharge in the DAM. This is the "here-and-now" decision.</li>
             <li><b>Stage 2 (Real-Time Market)</b>: The model considers multiple possible RTM price scenarios and their optimal responses, but these are not shown in the DAM chart.</li>
         </ol>
         <p>Even if the DAM schedule only shows charging (buying energy), the expected revenue accounts for anticipated profits from discharging (selling energy) in the RTM the next day.</p>
@@ -476,17 +476,35 @@ with results_tab:
                 st.markdown(f"**Optimal {opt_type.capitalize()} Schedule Data**")
                 st.dataframe(format_schedule_display(results['schedule_df'], opt_type), use_container_width=True)
                 
-                # Optionally display RTM Scenarios if stochastic
+                # Always show RTM Scenarios for stochastic optimization (not in an expander)
                 if opt_type == 'stochastic' and results.get('rtm_scenario_prices'):
-                     with st.expander("View Generated RTM Price Scenarios"):
-                         scen_fig = go.Figure()
-                         # Add DAM price for reference
-                         scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=results['dam_prices_df']['LMP'], name='DAM LMP', line=dict(color='black', width=3)))
-                         # Add scenarios
-                         for s_idx, rtm_lmp_series in results['rtm_scenario_prices'].items():
-                             scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=rtm_lmp_series, name=f'Scenario {s_idx}', line=dict(dash='dot'), opacity=0.7))
-                         scen_fig.update_layout(title="DAM Price vs. Generated RTM Price Scenarios", xaxis_title="Hour Ending", yaxis_title="LMP ($/MWh)")
-                         st.plotly_chart(scen_fig, use_container_width=True)
+                    st.markdown("### RTM Price Scenarios vs DAM Price")
+                    st.markdown("This chart shows how the model considers multiple possible Real-Time Market price scenarios when making Day-Ahead decisions:")
+                    scen_fig = go.Figure()
+                    # Add DAM price for reference
+                    scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=results['dam_prices_df']['LMP'], name='DAM LMP', line=dict(color='black', width=3)))
+                    # Add scenarios
+                    for s_idx, rtm_lmp_series in results['rtm_scenario_prices'].items():
+                        scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=rtm_lmp_series, name=f'Scenario {s_idx}', line=dict(dash='dot'), opacity=0.7))
+                    scen_fig.update_layout(
+                        title="DAM Price vs. Generated RTM Price Scenarios",
+                        xaxis_title="Hour Ending",
+                        yaxis_title="LMP ($/MWh)",
+                        height=500,
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(scen_fig, use_container_width=True)
+                    
+                    st.markdown("""
+                    <div class="explanation-box">
+                        <h4>How to Interpret RTM Scenarios</h4>
+                        <p>Each dotted line represents a possible RTM price scenario that could materialize the next day.</p>
+                        <p>The optimal DAM schedule (shown in the chart above) positions the battery to take advantage 
+                        of expected profitable opportunities across all these scenarios.</p>
+                        <p>The scenarios with prices higher than DAM prices present opportunities for discharging 
+                        in the RTM, which contributes to the expected revenue calculation.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             else:
                 st.error(f"Optimization Failed. Status: {results.get('status', 'N/A')}")
