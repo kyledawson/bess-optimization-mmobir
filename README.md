@@ -152,4 +152,4 @@ python bess_optimizer.py
 ## Notes
 
 - The stochastic optimization currently uses a placeholder scenario generation method (adding random noise to DAM prices). For real-world use, replace `generate_rtm_price_scenarios` in `bess_optimizer.py` with a proper forecasting and scenario generation technique.
-- The models focus on energy arbitrage and do not currently include Ancillary Service participation or detailed battery degradation modeling. 
+- The models focus on energy arbitrage and do not currently include Ancillary Service participation or detailed battery degradation modeling. # bess-optimization
