@@ -114,7 +114,7 @@ h3 {
     padding: 0.8rem 1rem;
 }
 
-/* Plotly chart container (if needed) */
+/* Plotly chart container */
 .stPlotlyChart {
     border-radius: 8px;
     overflow: hidden; /* Helps contain chart visuals */
@@ -161,4 +161,36 @@ h3 {
     font-size: 1.8rem;
     font-weight: 600;
     color: #1c1c1e;
+}
+
+/* --- Mobile Responsiveness --- */
+@media (max-width: 768px) {
+    /* Reduce padding on main container for smaller screens */
+    .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+        padding-top: 1rem;
+    }
+
+    /* Reduce padding around Plotly charts */
+    .stPlotlyChart {
+        padding: 0.5rem;
+    }
+
+    /* Adjust heading sizes for mobile */
+    h1 {
+        font-size: 1.8rem;
+    }
+    h2 {
+        font-size: 1.4rem;
+    }
+    h3 {
+        font-size: 1.1rem;
+    }
+
+    /* Make tab text slightly smaller */
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.9rem;
+    }
 } 

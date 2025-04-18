@@ -61,6 +61,7 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
     """
     Creates a single Plotly figure with two subplots (Price and Schedule) 
     sharing the x-axis. Adapts based on optimization type.
+    UPDATED: Adjusts legend for better mobile view.
     """
     is_stochastic = (opt_type == 'stochastic')
     
@@ -180,9 +181,16 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
     fig.update_layout(
         title_text=chart_title,
         height=700,
-        barmode='relative', 
-        legend_title_text="Metrics",
-        hovermode="x unified"
+        barmode='relative',
+        legend=dict(
+            orientation="h", # Horizontal legend
+            yanchor="bottom",
+            y=-0.25, # Position below the chart (adjust as needed)
+            xanchor="center",
+            x=0.5
+        ),
+        hovermode="x unified",
+        margin=dict(l=50, r=50, t=80, b=100) # Adjust margins if needed
     )
     fig.update_xaxes(showticklabels=False, row=1, col=1)
     fig.update_yaxes(title_text="LMP ($/MWh)", row=1, col=1)
@@ -538,13 +546,23 @@ with results_tab:
                     scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=results['dam_prices_df']['LMP'], name='DAM LMP', line=dict(color='black', width=3)))
                     # Add scenarios
                     for s_idx, rtm_lmp_series in results['rtm_scenario_prices'].items():
-                        scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=rtm_lmp_series, name=f'Scenario {s_idx}', line=dict(dash='dot'), opacity=0.7))
+                        # Limit number of scenario traces shown in legend for clarity
+                        show_legend = s_idx < 5 # Only show first 5 scenarios in legend
+                        scen_fig.add_trace(go.Scatter(x=results['dam_prices_df']['HourEnding'], y=rtm_lmp_series, name=f'Scenario {s_idx}', line=dict(dash='dot'), opacity=0.7, showlegend=show_legend))
                     scen_fig.update_layout(
                         title="DAM Price vs. Generated RTM Price Scenarios",
                         xaxis_title="Hour Ending",
                         yaxis_title="LMP ($/MWh)",
                         height=500,
-                        hovermode="x unified"
+                        hovermode="x unified",
+                        legend=dict(
+                            orientation="h", # Horizontal legend
+                            yanchor="bottom",
+                            y=-0.2, # Position below the chart (adjust as needed)
+                            xanchor="center",
+                            x=0.5
+                        ),
+                        margin=dict(l=50, r=50, t=80, b=100) # Adjust margins if needed
                     )
                     st.plotly_chart(scen_fig, use_container_width=True)
                     
