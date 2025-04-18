@@ -218,9 +218,9 @@ def render_bess_guide_tab():
     st.subheader("What We're Optimizing")
     st.markdown("""
     This application optimizes the **bidding and operational strategy** for a Battery Energy Storage System (BESS) 
-    participating in the ERCOT electricity market. The core objective is to **maximize revenue** by determining the 
+    participating in the ERCOT electricity market. The core objective is to **maximize NET revenue** by determining the 
     optimal times to charge (buy) and discharge (sell) energy, considering both Day-Ahead Market (DAM) and 
-    Real-Time Market (RTM) price variations.
+    Real-Time Market (RTM) price variations, while accounting for the **cost of battery degradation**.
     """)
     
     st.subheader("Why It Matters")
@@ -294,11 +294,13 @@ def render_bess_guide_tab():
     * Discharge Power (MW) for each hour h: `discharge_power[h] ≥ 0`
     * State of Charge (MWh) at end of each hour h: `soc[h]`
     * Binary variable indicating charging mode: `is_charging[h] ∈ {0,1}`
+    * Energy Throughput (MWh) in hour h: `energy_throughput[h]`
+    * Degradation Cost ($) for hour h: `degradation_cost[h]`
     """)
     
     st.markdown("**Objective Function:**")
-    st.markdown("Maximize: `∑(h) (discharge_power[h] - charge_power[h]) × LMP[h]`")
-    st.markdown("This represents the net revenue from buying and selling energy at known prices.")
+    st.markdown("Maximize Net Revenue: `∑(h) [ (discharge_power[h] - charge_power[h]) × LMP[h] ] - ∑(h) degradation_cost[h]`")
+    st.markdown("This maximizes gross arbitrage revenue minus the estimated cost of battery degradation.")
     
     st.markdown("**Key Constraints:**")
     st.markdown("""
@@ -306,7 +308,9 @@ def render_bess_guide_tab():
     * **SoC Evolution:** `soc[h+1] = soc[h] + (charge_power[h] × charge_efficiency) - (discharge_power[h] / discharge_efficiency)`
     * **SoC Limits:** `min_soc_mwh ≤ soc[h] ≤ max_soc_mwh`
     * **Power Limits:** `charge_power[h] ≤ max_charge_power_mw` and `discharge_power[h] ≤ max_discharge_power_mw`
-    * **No Simultaneous Charging/Discharging:** Uses binary variable `is_charging[h]` to prevent charging and discharging in the same hour
+    * **No Simultaneous Charging/Discharging:** Uses binary variable `is_charging[h]`.
+    * **Energy Throughput:** `energy_throughput[h] == charge_power[h]` (Approximation based on charge)
+    * **Degradation Cost:** `degradation_cost[h] >= energy_throughput[h] * avg_degradation_cost_per_mwh` (Uses simplified avg cost)
     """)
     
     st.markdown("---")
@@ -315,32 +319,33 @@ def render_bess_guide_tab():
     
     st.markdown("**Decision Variables:**")
     st.markdown("""
-    * **Stage 1 (DAM):** `dam_charge_power[h], dam_discharge_power[h]` for each hour h
-    * **Stage 2 (RTM):** `rtm_charge_power[h,s], rtm_discharge_power[h,s]` for each hour h and scenario s
-    * **State of Charge:** `soc[h,s]` for each hour h and scenario s
+    * **Stage 1 (DAM):** `dam_charge_power[h], dam_discharge_power[h]`
+    * **Stage 2 (RTM):** `rtm_charge_power[h,s], rtm_discharge_power[h,s]`
+    * **State of Charge:** `soc[h,s]`
+    * **Energy Throughput:** `energy_throughput[h,s]`
+    * **Degradation Cost:** `degradation_cost[h,s]`
     """)
     
     st.markdown("**Objective Function:**")
-    st.markdown("""
-    Maximize: 
-    ```
-    ∑(h) (dam_discharge_power[h] - dam_charge_power[h]) × DAM_LMP[h] + 
-    ∑(s) probability[s] × ∑(h) (rtm_discharge_power[h,s] - rtm_charge_power[h,s]) × RTM_LMP[h,s]
-    ```
-    """)
-    st.markdown("This represents the combined revenue from DAM operations plus the expected value of RTM adjustments.")
+    st.markdown("Maximize Expected Net Revenue:")
+    st.code("""
+    Maximize:
+      ∑(h) [ (dam_discharge_power[h] - dam_charge_power[h]) × DAM_LMP[h] ] 
+      + ∑(s) probability[s] × ∑(h) [ (rtm_discharge_power[h,s] - rtm_charge_power[h,s]) × RTM_LMP[h,s] ]
+      - ∑(s) probability[s] × ∑(h) [ degradation_cost[h,s] ]
+    """, language="text")
+    st.markdown("Maximizes DAM revenue plus expected RTM revenue, minus expected degradation cost.")
     
     st.markdown("**Key Constraints:**")
     st.markdown("""
-    * **Initial SoC:** `soc[0,s] = initial_soc_mwh` for all scenarios s
+    * **Initial SoC:** `soc[0,s] = initial_soc_mwh` (for all scenarios s)
     * **SoC Evolution:** 
-      ```
-      soc[h+1,s] = soc[h,s] + (dam_charge_power[h] + rtm_charge_power[h,s]) × charge_efficiency - 
-      (dam_discharge_power[h] + rtm_discharge_power[h,s]) / discharge_efficiency
-      ```
-    * **SoC Limits:** `min_soc_mwh ≤ soc[h,s] ≤ max_soc_mwh` for all h and s
-    * **Power Limits:** Combined DAM and RTM power must respect battery limits
-    * **Non-Anticipativity:** Stage 1 decisions (DAM) must be the same across all scenarios
+      `soc[h+1,s] = soc[h,s] + (total_charge[h,s] × charge_efficiency) - (total_discharge[h,s] / discharge_efficiency)`
+    * **SoC Limits:** `min_soc_mwh ≤ soc[h,s] ≤ max_soc_mwh`
+    * **Power Limits:** Combined DAM + RTM power respects limits.
+    * **Non-Anticipativity:** Stage 1 decisions are the same across scenarios.
+    * **Energy Throughput:** `energy_throughput[h,s] == total_charge[h,s]` (Approximation)
+    * **Degradation Cost:** `degradation_cost[h,s] >= energy_throughput[h,s] * avg_degradation_cost_per_mwh`
     """)
     
     st.markdown("---")
@@ -349,24 +354,20 @@ def render_bess_guide_tab():
     
     st.markdown("**Deterministic Results:**")
     st.markdown("""
-    * The optimal schedule shows when to charge (green bars) and discharge (red bars) in the DAM
-    * The "Optimal Deterministic Revenue" is the maximum profit achievable with perfect price knowledge
-    * State of Charge (%) line shows battery energy level throughout the day
+    * The optimal schedule shows when to charge (green bars) and discharge (red bars).
+    * The **Optimal Net Revenue** metric shows the profit after accounting for estimated degradation costs.
+    * State of Charge (%) line shows battery energy level.
     """)
     
     st.markdown("**Stochastic Results:**")
     st.markdown("""
-    * The chart shows only the Stage 1 (DAM) decisions - what to bid in the day-ahead market
-    * Even if only charging appears in the DAM schedule, the "Optimal Expected Revenue" includes anticipated 
-      profits from discharging in the RTM under various price scenarios
-    * The orange dotted line shows the average RTM price across scenarios, which influences the optimal DAM strategy
-    * The DAM schedule represents a robust strategy that performs well across all potential RTM price scenarios
+    * The chart shows only the Stage 1 (DAM) decisions.
+    * The **Optimal Expected Revenue** metric shows the *expected* profit across all scenarios, after accounting for *expected* degradation costs.
+    * The DAM schedule represents a robust strategy considering future uncertainty and degradation.
     """)
     
     st.markdown("""
-    **Key Insight:** In stochastic optimization, the DAM schedule represents strategic positioning 
-    (buying at relatively lower prices) to exploit expected higher RTM prices, even if those RTM actions 
-    aren't visible in the DAM schedule chart.
+    **Key Insight:** The optimization now balances immediate arbitrage profit against the long-term cost of battery degradation, aiming for the highest sustainable net revenue.
     """)
     
     st.subheader("How It Works")
@@ -390,11 +391,11 @@ def render_bess_guide_tab():
     st.markdown("""
     <div class="explanation-box">
         <h4>3. Mathematical Optimization</h4>
-        <p>Formulates a linear programming problem using PuLP to maximize expected revenue:</p>
+        <p>Formulates a linear programming problem using PuLP to maximize **net revenue** (deterministic) or **expected net revenue** (stochastic):</p>
         <ul>
-            <li><b>Decision Variables</b>: When and how much to charge/discharge in the DAM, and what adjustments to make in each RTM scenario</li>
-            <li><b>Constraints</b>: Battery capacity, power limits, state of charge limits, and energy conservation equations</li>
-            <li><b>Objective</b>: Maximize expected profit across all scenarios (weighted by probability)</li>
+            <li><b>Decision Variables</b>: Charge/discharge power, SoC (plus RTM adjustments in stochastic).</li>
+            <li><b>Constraints</b>: Battery limits, energy balance, degradation cost calculation.</li>
+            <li><b>Objective</b>: Maximize profit from energy sales minus costs (energy purchase + degradation).</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -402,9 +403,8 @@ def render_bess_guide_tab():
     st.markdown("""
     <div class="explanation-box">
         <h4>4. Result Interpretation</h4>
-        <p>The "Optimal Expected Revenue" represents the weighted average profit across all RTM scenarios, 
-        given the optimal DAM bidding strategy. Even if the DAM schedule shows only charging, the expected 
-        revenue includes anticipated profits from discharging in the RTM under various price scenarios.</p>
+        <p>The results show the optimal schedule and the calculated revenue, explicitly accounting for the estimated cost of battery degradation based on the provided parameters.</p>
+        <p>Negative net revenue suggests the estimated degradation cost and efficiency losses outweigh potential arbitrage profits for the selected day and parameters.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -423,11 +423,15 @@ def render_bess_guide_tab():
     
     st.subheader("Battery Parameters")
     st.markdown("""
-    The system uses environment variables to configure the BESS parameters:
-    * Capacity (MWh): Total energy storage capability
-    * Maximum charge/discharge power (MW): Power rating constraints
-    * Round-trip efficiency (%): Energy losses during charging/discharging cycle
-    * Minimum/maximum state of charge (%): Operating range limits to preserve battery life
+    The system uses environment variables (or reference values from `values.md`) to configure the BESS:
+    * **Capacity (MWh)**: Total energy storage capability.
+    * **Max Charge/Discharge Power (MW)**: Power rating constraints.
+    * **Round-trip Efficiency (%)**: Energy losses during charging/discharging.
+    * **Min/Max State of Charge (%)**: Operating range limits.
+    * **Initial State of Charge (%)**: Starting energy level.
+    * **Battery Cost ($/kWh)** (`BESS_COST_USD_PER_KWH`): Used for degradation cost calculation.
+    * **Cycle Life at 100% DoD** (`BESS_CYCLE_LIFE_100PCT_DOD`): Used for degradation cost calculation.
+    * *Note: `BESS_CYCLE_LIFE_10PCT_DOD` is no longer used in the current simplified degradation model.*
     """)
 
 # --- App Layout ---
@@ -509,11 +513,15 @@ with results_tab:
 
                 # Display results - adapt metric based on type
                 if opt_type == 'stochastic':
-                    st.metric("Optimal Expected Revenue", f"${results['expected_revenue']:.2f}")
+                    st.metric("Optimal Expected Net Revenue", f"${results['expected_net_revenue']:.2f}")
                     # Add the explanation for stochastic revenue calculation
                     render_revenue_explanation()
-                else:
-                    st.metric("Optimal Deterministic Revenue", f"${results['total_revenue']:.2f}")
+                    # Display cost breakdown
+                    st.markdown(f"(Expected Gross Revenue: ${results.get('dam_revenue', 0) + results.get('expected_rtm_revenue', 0):.2f}, Expected Degradation Cost: ${results.get('expected_degradation_cost', 0):.2f})")
+                else: # Deterministic
+                    st.metric("Optimal Net Revenue", f"${results['net_revenue']:.2f}")
+                    # Display cost breakdown
+                    st.markdown(f"(Gross Revenue: ${results.get('total_revenue', 0):.2f}, Degradation Cost: ${results.get('degradation_cost', 0):.2f})")
                 
                 # Call the combined chart function (adapts internally)
                 st.plotly_chart(create_combined_chart(results['schedule_df'], results['dam_prices_df'], opt_type), use_container_width=True)
