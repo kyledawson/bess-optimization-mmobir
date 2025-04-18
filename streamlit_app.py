@@ -185,12 +185,12 @@ def create_combined_chart(schedule_df, prices_df, opt_type):
         legend=dict(
             orientation="h", # Horizontal legend
             yanchor="bottom",
-            y=-0.25, # Position below the chart (adjust as needed)
+            y=-0.3, # Adjusted y-position further down
             xanchor="center",
             x=0.5
         ),
         hovermode="x unified",
-        margin=dict(l=50, r=50, t=80, b=100) # Adjust margins if needed
+        margin=dict(l=50, r=50, t=80, b=120) # Increased bottom margin
     )
     fig.update_xaxes(showticklabels=False, row=1, col=1)
     fig.update_yaxes(title_text="LMP ($/MWh)", row=1, col=1)
@@ -558,11 +558,11 @@ with results_tab:
                         legend=dict(
                             orientation="h", # Horizontal legend
                             yanchor="bottom",
-                            y=-0.2, # Position below the chart (adjust as needed)
+                            y=-0.25, # Adjusted y-position further down
                             xanchor="center",
                             x=0.5
                         ),
-                        margin=dict(l=50, r=50, t=80, b=100) # Adjust margins if needed
+                        margin=dict(l=50, r=50, t=80, b=120) # Increased bottom margin
                     )
                     st.plotly_chart(scen_fig, use_container_width=True)
                     
