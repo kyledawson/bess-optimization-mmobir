@@ -709,7 +709,7 @@ def fetch_and_process_rtm_prices(
             settlement_point=settlement_point, start_time=start_time
         )
         # Sort raw_prices by date:
-        raw_prices = sorted(raw_prices, key=lambda x: (x[0], x[1]))
+        raw_prices = sorted(raw_prices, key=lambda x: (x[0], x[1], x[2]))
 
         start_date = datetime.strptime(
             raw_prices[0][0],
